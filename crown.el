@@ -55,6 +55,8 @@ Prerequisites list:
         (message "crown package build dependency already up to date")
       (message "crown package build dependency needs to be updated"))))
 
+(defvar crown-configs-alist ())
+
 (defcustom crown-dir (expand-file-name "crown" user-emacs-directory)
   "Where crown stores its stuff."
   :group 'crown
@@ -65,17 +67,28 @@ Prerequisites list:
   :group 'crown
   :type 'string)
 
-;; --> macro
-;; add config name to crown-configs-alist
-(defun crown-use-config (name address)
-  (interactive)
-  (let ((dir (expand-file-name name crown-configs-dir)))
-    (cond
-     ((s-ends-with? ".git" address t)
-      (pb/checkout-git name (list :url address) dir))
-     (t
-      (error "Unsupported repository with address %s" address)))
-    ))
+;; --> continue to develop the macro
+;; put the packages for this crown config etc...
+(defmacro crown-use-config (symbol &rest properties)
+  ""
+  (declare (indent 1))
+  (let ((url (plist-get properties :url))
+        (dir (expand-file-name (symbol-name symbol) crown-configs-dir)))
+    (when (null url)
+      (error "Missing :url"))
+    (unless (stringp url)
+      (error "Invalid url %S" url))
+    `(progn 
+       (cond
+        ((s-ends-with? ".git" ,url t)
+         (pb/checkout-git ',symbol '(:url ,url) ,dir))
+        (t
+         (error "Unsupported repository with url %s" ,url)))
+       (let ((package-file ,(expand-file-name "packages.el" dir)))
+         (load package-file)
+         )
+       (progn (put ',symbol :crown-url ,url))
+       (add-to-list 'crown-configs-alist '(,symbol . (:url ,url))))))
 
 (defun crown-config-fetch (name))
 (defun crown-config-fetch-all (name))
@@ -90,14 +103,34 @@ Prerequisites list:
 (defun crown-get-inst-package-version (package) "12235")
 (package-installed-p 'package-build)
 
+(macroexpand '(crown-use-config crown-themes
+                :url "http://github.com/syl20bnr/crown-themes.git"))
+(crown-use-config crown-themes
+                :url "http://github.com/syl20bnr/crown-themes.git")
+
+(message "%s" packages)
+
+(let ((dir (expand-file-name "crown-themes" crown-configs-dir)))
+  (cond
+   ((s-ends-with\? ".git" "http://github.com/syl20bnr/crown-themes.git" t)
+    (pb/checkout-git ... ... dir))
+   (t
+    (error "Unsupported repository with url %s" "http://github.com/syl20bnr/crown-themes.git")))
+  (let ((package-file ...))
+    (load package-file))
+  (progn
+    (put (quote crown-themes) :crown-url))
+  (add-to-list crown-configs-alist (symbol :url "http://github.com/syl20bnr/crown-themes.git")))
+
 (defun crown-tests ()
   (message "%s" package-alist)
   (crown-install-crown)
   (crown-get-inst-package-version 'package-build)
   (crown-get-melpa-package-version 'package-build)
   (crown-update-crown)
-  (crown-use-config "crown-themes" "http://github.com/syl20bnr/crown-themes.git")
-  (crown-use-config "crown-themes" "http://hub.com/syl20bnr/crown-themes")
+  (crown-use-config 'crown-themes "http://github.com/syl20bnr/crown-themes.git")
+  (crown-use-config 'crown-themes "http://hub.com/syl20bnr/crown-themes")
 )
+
 
 (provide 'crown)
