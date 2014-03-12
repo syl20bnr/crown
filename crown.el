@@ -9,15 +9,6 @@
 ;                         ("marmalade" . "http://marmalade-repo.org/packages/")
                          ("melpa" . "http://melpa.milkbox.net/packages/")))
 
-(defun s-ends-with? (suffix s &optional ignore-case)
-  "Does S end with SUFFIX?
-If IGNORE-CASE is non-nil, the comparison is done without paying
-attention to case differences."
-  (let ((start-pos (- (length s) (length suffix))))
-    (and (>= start-pos 0)
-         (eq t (compare-strings suffix nil nil
-                                s start-pos nil ignore-case)))))
-
 (defun crown-init ()
   "Install or update the prerequisites for Crown.
 
@@ -25,27 +16,34 @@ Prerequisites list:
   -package-build "
   (interactive)
   (let ((temp-dir (make-temp-file "crown" t)))
-    ;; if we do not have melpa's package-build,
-    ;; get the tar package and install it
-    (unless (package-installed-p 'package-build)
+    (unless (and (package-installed-p 'package-build)
+               (package-installed-p 's))
       (let* ((archive "http://melpa.milkbox.net/packages/")
              (archive-contents (with-temp-buffer
                                  (url-insert-file-contents
                                   (concat archive "archive-contents"))
                                  (cdr (read (current-buffer)))))
-             (archive-entry (assoc 'package-build archive-contents))
-             (archive-file-name
-              (let* ((name (car archive-entry)) (pkg-info (cdr archive-entry))
-                     (version (package-version-join (aref pkg-info 0)))
-                     (flavour (aref pkg-info 3)))
-                (format "%s-%s.%s" name version (if (eq flavour 'single)
-                                                    "el" "tar"))))
-             (archive-url (concat archive archive-file-name))
-             (file (expand-file-name archive-file-name temp-dir)))
-        (url-copy-file archive-url file t)
-        (package-install-file file)))
-    (require 'package-build "package-build.el")
-    (delete-directory temp-dir t)))
+             (package-build-entry (assoc 'package-build archive-contents))
+             (s-entry (assoc 's archive-contents)))
+        (crown-package-install archive package-build-entry)
+        (crown-package-install archive s-entry)
+        (require 'package-build "package-build.el")
+        (require 's)
+        (delete-directory temp-dir t)))))
+
+(defun crown-package-install (archive entry)
+  ""
+  (let*
+      ((archive-file-name
+        (let* ((name (car entry)) (pkg-info (cdr entry))
+               (version (package-version-join (aref pkg-info 0)))
+               (flavour (aref pkg-info 3)))
+          (format "%s-%s.%s" name version (if (eq flavour 'single)
+                                              "el" "tar"))))
+       (archive-url (concat archive archive-file-name))
+       (file (expand-file-name archive-file-name temp-dir)))
+    (url-copy-file archive-url file t)
+    (package-install-file file)))
 
 (defun crown-get-melpa-package-version (package)
   (let* ((temp-dir (make-temp-file "crown" t))
@@ -108,6 +106,14 @@ Prerequisites list:
              (error "Unsupported repository with url %s" ,url))))
        (load ,jewel-packages-file)
        (put ',symbol :jewel-url ,url)
+       (put ',symbol :jewel-dir ,jewel-dir)
+       (put ',symbol :jewel-init-file
+            ,(expand-file-name "init.el" jewel-dir))
+       (put ',symbol :jewel-functions-file
+            ,(expand-file-name "functions.el" jewel-dir))
+       (put ',symbol :jewel-keybindings-file
+            ,(expand-file-name "keybindings.el" jewel-dir))
+       (put ',symbol :jewel-packages-file ,jewel-packages-file)
        (put ',symbol :jewel-packages packages)
        (add-to-list 'crown-jewels-alist '(,symbol . (:url ,url))))))
 
@@ -119,13 +125,22 @@ Prerequisites list:
             (not-installed (remove-if 'package-installed-p packages)))
 ;       (message "jewel packages: %s" ',packages)
        (if (and not-installed
-              (y-or-n-p (format "There are %d packages to be installed. %s "
-                                (length not-installed) "Install them?" )))
+              (y-or-n-p
+               (format "Crown: jewel %S will install %d packages. %s "
+                       ',symbol (length not-installed) "Proceed?" )))
            (progn
              (package-refresh-contents)
              (dolist (package packages)
                (when (not (package-installed-p package))
-                 (package-install package))))))))
+                 (package-install package))))))
+     (load (get ',symbol :jewel-init-file))
+     (load (get ',symbol :jewel-functions-file))
+     (load (get ',symbol :jewel-keybindings-file))))
+
+(defmacro crown-cur-and-set-jewel (symbol &rest properties)
+  `(progn
+     (crown-cut-jewel ,symbol ,properties)
+     (crown-set-jewel ,symbol)))
 
 (defmacro crown-unset-jewel (symbol)
   ""
@@ -135,8 +150,9 @@ Prerequisites list:
             (installed (remove-if-not 'package-installed-p packages)))
        (message "jewel packages: %s" ',packages)
        (if (and installed
-              (y-or-n-p (format "There are %d installed packages. %s "
-                                (length installed) "Uninstall them?" )))
+              (y-or-n-p
+               (format "Crown: jewel %S will uninstall %d packages. %s "
+                       ',symbol (length installed) "Proceed?" )))
            (progn
              (package-refresh-contents)
              (dolist (package packages)
